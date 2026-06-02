@@ -1,0 +1,643 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>잠수함 탐지 작전</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&display=swap');
+  * { margin:0; padding:0; box-sizing:border-box; }
+  :root {
+    --bg:#030d06; --bg3:#071a0d;
+    --green:#00ff50;
+    --danger:#ff4444; --warning:#ffaa00;
+    --text:#a0e8b0; --text2:#4a8a5a;
+  }
+  body {
+    background:var(--bg); color:var(--text);
+    font-family:'Share Tech Mono',monospace;
+    min-height:100vh; display:flex; flex-direction:column; align-items:center;
+    overflow-x:hidden;
+  }
+  .scanlines {
+    position:fixed; inset:0; pointer-events:none; z-index:100;
+    background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,0.04) 2px,rgba(0,0,0,0.04) 4px);
+  }
+  header {
+    width:100%; max-width:1100px; padding:1.2rem 2rem 0.5rem;
+    display:flex; justify-content:space-between; align-items:center;
+    border-bottom:1px solid rgba(0,255,80,0.1);
+  }
+  .title { font-family:'Orbitron',monospace; font-size:1rem; font-weight:700; color:var(--green); letter-spacing:0.15em; }
+  .hud { display:flex; gap:2rem; align-items:center; }
+  .hud-item { display:flex; flex-direction:column; align-items:center; gap:2px; }
+  .hud-label { font-size:0.6rem; color:var(--text2); letter-spacing:0.12em; text-transform:uppercase; }
+  .hud-value { font-family:'Orbitron',monospace; font-size:1.2rem; font-weight:700; color:var(--green); }
+  .hud-value.timer-warn { color:var(--warning); animation:blink 0.6s infinite; }
+  .hud-value.timer-danger { color:var(--danger); animation:blink 0.4s infinite; }
+  @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+  /* ── 레이아웃 ── */
+  main {
+    width:100%; max-width:1100px; padding:1rem 2rem 2rem;
+    display:flex; gap:1.2rem; align-items:flex-start;
+  }
+  .left-col { flex:1; display:flex; flex-direction:column; gap:1rem; }
+  .canvas-wrapper {
+    border:1px solid rgba(0,255,80,0.25); border-radius:6px;
+    overflow:hidden; background:#000;
+  }
+  canvas { display:block; width:100%; height:auto; }
+
+  /* ── 게임 로그 ── */
+  .log-box {
+    background:var(--bg3); border:1px solid rgba(0,255,80,0.15);
+    border-radius:6px; padding:0.8rem 1.2rem;
+  }
+  .log-scroll { max-height:160px; overflow-y:auto; }
+  .log-title {
+    font-size:0.6rem; color:var(--text2); letter-spacing:0.15em; text-transform:uppercase;
+    border-bottom:1px solid rgba(0,255,80,0.1); padding-bottom:0.5rem; margin-bottom:0.6rem;
+  }
+  .log-table { width:100%; border-collapse:collapse; font-size:0.68rem; }
+  .log-table th {
+    color:var(--text2); letter-spacing:0.08em; font-weight:400;
+    padding:0.2rem 0.6rem 0.3rem 0; text-align:left; border-bottom:1px solid rgba(0,255,80,0.08);
+  }
+  .log-table td { padding:0.25rem 0.6rem 0.25rem 0; color:var(--text); vertical-align:middle; }
+  .log-table tr:last-child td { border-bottom:none; }
+  .log-table tr td:first-child { color:var(--text2); }
+  .badge {
+    display:inline-block; padding:1px 7px; border-radius:3px;
+    font-size:0.62rem; letter-spacing:0.06em;
+  }
+  .badge-success { background:rgba(0,255,80,0.15); color:var(--green); }
+  .badge-danger  { background:rgba(255,68,68,0.15); color:var(--danger); }
+  .badge-warning { background:rgba(255,170,0,0.15); color:var(--warning); }
+
+  /* ── 사이드 패널 ── */
+  .side-panel { width:220px; flex-shrink:0; display:flex; flex-direction:column; gap:1rem; }
+  .panel-box {
+    background:var(--bg3); border:1px solid rgba(0,255,80,0.15);
+    border-radius:6px; padding:1rem 1.2rem; display:flex; flex-direction:column; gap:0.8rem;
+  }
+  .panel-title {
+    font-size:0.6rem; color:var(--text2); letter-spacing:0.15em; text-transform:uppercase;
+    border-bottom:1px solid rgba(0,255,80,0.1); padding-bottom:0.5rem;
+  }
+  .status-text { font-size:0.8rem; color:var(--text2); line-height:1.5; min-height:2.5rem; }
+  .status-text.alert   { color:var(--green); animation:blink 1s infinite; }
+  .status-text.success { color:var(--green); animation:none; }
+  .status-text.danger  { color:var(--danger); animation:none; }
+  .status-text.warning { color:var(--warning); animation:none; }
+  .phase-tag { font-size:0.6rem; color:var(--text2); letter-spacing:0.15em; text-align:right; }
+  .slider-col { display:flex; flex-direction:column; gap:0.6rem; }
+  .slider-header { display:flex; justify-content:space-between; align-items:baseline; }
+  .slider-label { font-size:0.65rem; color:var(--text2); letter-spacing:0.1em; text-transform:uppercase; }
+  .slider-value { font-family:'Orbitron',monospace; font-size:1rem; color:var(--green); }
+  input[type=range] {
+    width:100%; -webkit-appearance:none; appearance:none;
+    height:4px; border-radius:2px; background:rgba(0,255,80,0.15); outline:none;
+  }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance:none; width:18px; height:18px; border-radius:50%;
+    background:var(--green); cursor:pointer; border:2px solid var(--bg);
+    box-shadow:0 0 8px var(--green);
+  }
+  input[type=range]:disabled { opacity:0.3; cursor:not-allowed; }
+  button {
+    font-family:'Share Tech Mono',monospace; font-size:0.78rem;
+    letter-spacing:0.1em; text-transform:uppercase;
+    padding:0.6rem 0; width:100%; border-radius:4px; border:1px solid;
+    cursor:pointer; transition:all 0.2s;
+  }
+  .btn-submit { background:transparent; border-color:var(--green); color:var(--green); }
+  .btn-submit:hover:not(:disabled) { background:var(--green); color:var(--bg); }
+  .btn-submit:disabled { opacity:0.25; cursor:not-allowed; }
+  .btn-next { background:var(--green); border-color:var(--green); color:var(--bg); font-weight:700; display:none; }
+  .btn-next:hover { opacity:0.85; }
+  .btn-reset { background:transparent; border-color:rgba(0,255,80,0.3); color:var(--text2); }
+  .btn-reset:hover { border-color:var(--green); color:var(--green); }
+  .result-row { display:flex; flex-direction:column; gap:3px; font-size:0.65rem; color:var(--text2); letter-spacing:0.06em; }
+  .result-row span { font-family:'Orbitron',monospace; font-size:0.95rem; color:var(--green); }
+
+  /* ── 오버레이 ── */
+  .overlay {
+    position:fixed; inset:0; background:rgba(3,13,6,0.95);
+    display:none; flex-direction:column; align-items:center; justify-content:center;
+    gap:1.5rem; z-index:200;
+  }
+  .overlay.active { display:flex; }
+  .overlay-title { font-family:'Orbitron',monospace; font-size:2rem; font-weight:900; color:var(--green); letter-spacing:0.2em; text-align:center; }
+  .overlay-sub { font-size:0.78rem; color:var(--text2); letter-spacing:0.06em; text-align:center; line-height:2.2; max-width:380px; }
+  .overlay-stats { display:flex; gap:3rem; }
+  .overlay-stat { display:flex; flex-direction:column; align-items:center; gap:4px; }
+  .overlay-stat-label { font-size:0.6rem; color:var(--text2); letter-spacing:0.12em; text-transform:uppercase; }
+  .overlay-stat-val { font-family:'Orbitron',monospace; font-size:1.8rem; font-weight:700; color:var(--green); }
+  .highscore-badge {
+    font-size:0.7rem; color:var(--warning); letter-spacing:0.1em;
+    border:1px solid var(--warning); padding:2px 10px; border-radius:3px;
+    display:none;
+  }
+  .btn-start {
+    background:var(--green); border-color:var(--green); color:var(--bg);
+    font-size:0.9rem; padding:0.9rem 2.5rem; width:auto;
+    letter-spacing:0.18em; font-family:'Orbitron',monospace; font-weight:700;
+  }
+  .btn-start:hover { opacity:0.85; }
+  .btn-restart {
+    background:transparent; border-color:var(--green); color:var(--green);
+    font-size:0.85rem; padding:0.8rem 2rem; width:auto;
+    letter-spacing:0.15em; font-family:'Orbitron',monospace;
+  }
+  .btn-restart:hover { background:var(--green); color:var(--bg); }
+</style>
+</head>
+<body>
+<div class="scanlines"></div>
+
+<!-- 시작 오버레이 -->
+<div class="overlay active" id="overlay-start">
+  <div class="overlay-title">음파 탐지 작전</div>
+  <div class="overlay-sub">
+    적 잠수함이 직선 항로로 반복 이동합니다.<br>
+    항로를 관측한 뒤 레이더 반경을 조절해<br>
+    60초 안에 최대한 많이 탐지하세요.
+  </div>
+  <button class="btn-start" onclick="startGame()">작전 시작</button>
+</div>
+
+<!-- 종료 오버레이 -->
+<div class="overlay" id="overlay-end">
+  <div class="overlay-title">작전 종료</div>
+  <div class="overlay-stats">
+    <div class="overlay-stat">
+      <div class="overlay-stat-label">최종 점수</div>
+      <div class="overlay-stat-val" id="end-score">0</div>
+    </div>
+    <div class="overlay-stat">
+      <div class="overlay-stat-label">탐지 성공</div>
+      <div class="overlay-stat-val" id="end-hits">0</div>
+    </div>
+    <div class="overlay-stat">
+      <div class="overlay-stat-label">최고 기록</div>
+      <div class="overlay-stat-val" id="end-best">0</div>
+    </div>
+  </div>
+  <div class="highscore-badge" id="highscore-badge">★ 신기록!</div>
+  <div style="width:600px;max-width:90vw;background:var(--bg3);border:1px solid rgba(0,255,80,0.15);border-radius:6px;padding:0.8rem 1.2rem;">
+    <div class="log-title" style="margin-bottom:0.6rem;">탐지 로그</div>
+    <div style="max-height:200px;overflow-y:auto;">
+      <table class="log-table" id="end-log-table">
+        <thead>
+          <tr>
+            <th>라운드</th><th>상태</th><th>레이더 반지름</th><th>경로와 레이더 사이 거리</th>
+          </tr>
+        </thead>
+        <tbody id="end-log-body"></tbody>
+      </table>
+    </div>
+  </div>
+  <button class="btn-restart" onclick="restartGame()">재시작</button>
+</div>
+
+<header>
+  <div class="title">⬡ 음파 탐지 시스템</div>
+  <div class="hud">
+    <div class="hud-item">
+      <div class="hud-label">라운드</div>
+      <div class="hud-value" id="round-display">1</div>
+    </div>
+    <div class="hud-item">
+      <div class="hud-label">점수</div>
+      <div class="hud-value" id="score-display">0</div>
+    </div>
+    <div class="hud-item">
+      <div class="hud-label">남은 시간</div>
+      <div class="hud-value" id="timer-display">60</div>
+    </div>
+  </div>
+</header>
+
+<main>
+  <!-- 왼쪽: 캔버스 + 로그 -->
+  <div class="left-col">
+    <div class="canvas-wrapper">
+      <canvas id="gameCanvas" width="780" height="520"></canvas>
+    </div>
+
+    <div class="log-box">
+      <div class="log-title">탐지 로그</div>
+      <div class="log-scroll">
+      <table class="log-table">
+        <thead>
+          <tr>
+            <th>라운드</th>
+            <th>상태</th>
+            <th>레이더 반지름</th>
+            <th>경로와 레이더 사이 거리</th>
+          </tr>
+        </thead>
+        <tbody id="log-body">
+          <tr><td colspan="4" style="color:var(--text2);padding:0.4rem 0;">—</td></tr>
+        </tbody>
+      </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- 오른쪽: 컨트롤 패널 -->
+  <div class="side-panel">
+    <div class="panel-box">
+      <div class="panel-title">상태</div>
+      <div class="status-text" id="status-text">대기 중...</div>
+      <div class="phase-tag" id="phase-indicator">대기</div>
+    </div>
+
+    <div class="panel-box">
+      <div class="panel-title">탐지 반경 조절</div>
+      <div class="slider-col">
+        <div class="slider-header">
+          <div class="slider-label">반경</div>
+          <div class="slider-value" id="sliderVal">80</div>
+        </div>
+        <input type="range" id="radiusSlider" min="10" max="220" value="80" step="1" disabled>
+      </div>
+      <button class="btn-submit" id="submitBtn" disabled>▶ 탐지 제출</button>
+      <button class="btn-reset" onclick="restartGame()">↺ 다시 시작</button>
+    </div>
+
+  </div>
+</main>
+
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const W = canvas.width, H = canvas.height;
+const CX = W/2, CY = H/2;
+const RC = {x:CX, y:CY};
+const MAX_R = 220;
+const TOLERANCE = 10;
+const GAME_TIME = 60;
+
+let highScore = 0;
+let gameLog = [];
+
+let state = {
+  round:1, score:0, hits:0,
+  timeLeft:GAME_TIME,
+  phase:'idle',
+  radar_r:80,
+  sub:null, subT:0, subDuration:0,
+  submitted:false, resultShown:false,
+  animFrame:null, lastTime:null,
+  radarColor:'default',
+  shakeT:0, scanAngle:0,
+};
+
+function getSubDuration() {
+  return Math.max(1200, 5000 - (state.round-1)*200);
+}
+
+function pointToLineDist(p,a,b) {
+  const dx=b.x-a.x, dy=b.y-a.y, len=Math.hypot(dx,dy);
+  if(len===0) return Math.hypot(p.x-a.x,p.y-a.y);
+  return Math.abs((p.x-a.x)*dy-(p.y-a.y)*dx)/len;
+}
+
+function randomOnSide(side,margin) {
+  switch(side){
+    case 0:return{x:margin+Math.random()*(W-2*margin),y:margin};
+    case 1:return{x:W-margin,y:margin+Math.random()*(H-2*margin)};
+    case 2:return{x:margin+Math.random()*(W-2*margin),y:H-margin};
+    case 3:return{x:margin,y:margin+Math.random()*(H-2*margin)};
+  }
+}
+
+function generatePath() {
+  for(let i=0;i<300;i++){
+    const s1=Math.floor(Math.random()*4);
+    const s2=[0,1,2,3].filter(s=>s!==s1)[Math.floor(Math.random()*3)];
+    const p1=randomOnSide(s1,60), p2=randomOnSide(s2,60);
+    const dist=pointToLineDist(RC,p1,p2);
+    if(dist>30&&dist<MAX_R-15) return{p1,p2,dist};
+  }
+  return{p1:{x:50,y:120},p2:{x:W-50,y:400},dist:140};
+}
+
+function startGame() {
+  document.getElementById('overlay-start').classList.remove('active');
+  gameLog = [];
+  renderLog();
+  startRound();
+}
+
+function startRound() {
+  const path = generatePath();
+  Object.assign(state,{
+    sub:path, subT:0, subDuration:getSubDuration(),
+    phase:'moving', submitted:false, resultShown:false,
+    radarColor:'default', shakeT:0, lastTime:null,
+  });
+  document.getElementById('radiusSlider').disabled=false;
+  document.getElementById('submitBtn').disabled=false;
+  document.getElementById('submitBtn').style.display='';
+  document.getElementById('round-display').textContent=state.round;
+  document.getElementById('score-display').textContent=state.score;
+  setStatus('적 잠수함 항로를 관측하세요!','alert');
+  setPhase('관측 중');
+  if(state.animFrame) cancelAnimationFrame(state.animFrame);
+  state.animFrame=requestAnimationFrame(gameLoop);
+}
+
+function gameLoop(ts) {
+  if(!state.lastTime) state.lastTime=ts;
+  const dt=Math.min(ts-state.lastTime,100);
+  state.lastTime=ts;
+
+  // 타이머 감소
+  if(state.phase==='moving'||state.phase==='result') {
+    state.timeLeft=Math.max(0, state.timeLeft-dt/1000);
+    updateTimerDisplay();
+    if(state.timeLeft<=0) { endGame(); return; }
+  }
+
+  state.scanAngle=(state.scanAngle+dt*0.0018)%(Math.PI*2);
+  if(state.shakeT>0) state.shakeT-=dt;
+
+  if(state.phase==='moving') {
+    state.subT+=dt/state.subDuration;
+    if(state.subT>=1) state.subT-=1;
+  }
+
+  draw();
+
+  if(state.phase==='moving'||state.phase==='result') {
+    state.animFrame=requestAnimationFrame(gameLoop);
+  }
+}
+
+function updateTimerDisplay() {
+  const el=document.getElementById('timer-display');
+  const t=Math.ceil(state.timeLeft);
+  el.textContent=t;
+  el.className='hud-value';
+  if(t<=10) el.classList.add('timer-danger');
+  else if(t<=20) el.classList.add('timer-warn');
+}
+
+function submit() {
+  if(state.submitted||state.phase!=='moving') return;
+  state.submitted=true;
+  document.getElementById('submitBtn').disabled=true;
+  document.getElementById('radiusSlider').disabled=true;
+
+  const dist=state.sub.dist;
+  const r=state.radar_r;
+  const diff=r-dist;
+  let statusLabel='';
+
+  if(Math.abs(diff)<=TOLERANCE){
+    state.radarColor='success'; state.shakeT=700;
+    setStatus('탐지 성공!','success');
+    const bonus=Math.max(0,Math.round((TOLERANCE-Math.abs(diff))*5));
+    state.score+=100+bonus;
+    state.hits++;
+    statusLabel='success';
+  } else if(r<dist){
+    state.radarColor='danger';
+    setStatus('범위 부족','danger');
+    statusLabel='danger';
+  } else {
+    state.radarColor='warning';
+    setStatus('과잉 범위','warning');
+    statusLabel='warning';
+  }
+
+  // 로그 누적 (오래된 것이 위, 새 것이 아래)
+  gameLog.push({ round:state.round, status:statusLabel, r:Math.round(r), dist:Math.round(dist) });
+  appendLogRow(gameLog[gameLog.length-1]);
+
+  state.resultShown=true;
+  state.phase='result';
+  document.getElementById('score-display').textContent=state.score;
+  setPhase('결과');
+
+  // 1.5초 후 자동으로 다음 라운드
+  setTimeout(()=>{
+    if(state.phase==='result') nextRound();
+  }, 1500);
+}
+
+function appendLogRow(entry) {
+  const tbody=document.getElementById('log-body');
+  // 첫 항목이면 placeholder 제거
+  if(gameLog.length===1) tbody.innerHTML='';
+  const badgeClass={ success:'badge-success', danger:'badge-danger', warning:'badge-warning' }[entry.status];
+  const label={ success:'탐지 성공', danger:'범위 부족', warning:'과잉 범위' }[entry.status];
+  const tr=document.createElement('tr');
+  tr.innerHTML=`
+    <td>${entry.round}</td>
+    <td><span class="badge ${badgeClass}">${label}</span></td>
+    <td>${entry.r}</td>
+    <td>${entry.dist}</td>`;
+  tbody.appendChild(tr);
+  // 최신 행이 보이도록 스크롤
+  tr.scrollIntoView({behavior:'smooth', block:'nearest'});
+}
+
+function renderLog() {
+  const tbody=document.getElementById('log-body');
+  if(gameLog.length===0){
+    tbody.innerHTML='<tr><td colspan="4" style="color:var(--text2);padding:0.4rem 0;">—</td></tr>';
+    return;
+  }
+  tbody.innerHTML=gameLog.map(entry=>{
+    const badgeClass={ success:'badge-success', danger:'badge-danger', warning:'badge-warning' }[entry.status];
+    const label={ success:'탐지 성공', danger:'범위 부족', warning:'과잉 범위' }[entry.status];
+    return `<tr>
+      <td>${entry.round}</td>
+      <td><span class="badge ${badgeClass}">${label}</span></td>
+      <td>${entry.r}</td>
+      <td>${entry.dist}</td>
+    </tr>`;
+  }).join('');
+}
+
+function nextRound() {
+  state.round++;
+  startRound();
+}
+
+function endGame() {
+  state.phase='idle';
+  if(state.animFrame) cancelAnimationFrame(state.animFrame);
+
+  const isNew = state.score > highScore;
+  if(isNew) highScore=state.score;
+
+  document.getElementById('end-score').textContent=state.score;
+  document.getElementById('end-hits').textContent=state.hits;
+  document.getElementById('end-best').textContent=highScore;
+  document.getElementById('highscore-badge').style.display=isNew?'':'none';
+
+  // 종료 오버레이에 로그 복사
+  const endBody=document.getElementById('end-log-body');
+  endBody.innerHTML=gameLog.length===0
+    ? '<tr><td colspan="4" style="color:var(--text2);padding:0.4rem 0;">—</td></tr>'
+    : gameLog.map(entry=>{
+        const badgeClass={success:'badge-success',danger:'badge-danger',warning:'badge-warning'}[entry.status];
+        const label={success:'탐지 성공',danger:'범위 부족',warning:'과잉 범위'}[entry.status];
+        return `<tr><td>${entry.round}</td><td><span class="badge ${badgeClass}">${label}</span></td><td>${entry.r}</td><td>${entry.dist}</td></tr>`;
+      }).join('');
+
+  document.getElementById('overlay-end').classList.add('active');
+}
+
+function restartGame() {
+  document.getElementById('overlay-end').classList.remove('active');
+  if(state.animFrame) cancelAnimationFrame(state.animFrame);
+  gameLog=[];
+  renderLog();
+  Object.assign(state,{
+    round:1, score:0, hits:0, timeLeft:GAME_TIME,
+    phase:'idle', radar_r:80,
+    sub:null, submitted:false, resultShown:false,
+    radarColor:'default', shakeT:0, scanAngle:0,
+  });
+  document.getElementById('radiusSlider').value=80;
+  document.getElementById('sliderVal').textContent='80';
+  document.getElementById('timer-display').textContent=GAME_TIME;
+  document.getElementById('timer-display').className='hud-value';
+  startRound();
+}
+
+function setStatus(msg,cls) {
+  const el=document.getElementById('status-text');
+  el.textContent=msg;
+  el.className='status-text'+(cls?' '+cls:'');
+}
+function setPhase(msg){ document.getElementById('phase-indicator').textContent=msg; }
+
+// ── 그리기 ──────────────────────────
+function draw() {
+  ctx.clearRect(0,0,W,H);
+  drawBg(); drawGrid(); drawRadar();
+  if(state.resultShown) drawPath();
+  if(state.sub&&state.phase==='moving') drawSub();
+  drawEndpoints();
+}
+
+function drawBg() {
+  ctx.fillStyle='#000308'; ctx.fillRect(0,0,W,H);
+  const g=ctx.createRadialGradient(CX,CY,0,CX,CY,350);
+  g.addColorStop(0,'rgba(0,40,15,0.5)'); g.addColorStop(1,'rgba(0,0,0,0)');
+  ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
+}
+
+function drawGrid() {
+  ctx.strokeStyle='rgba(0,180,50,0.06)'; ctx.lineWidth=1;
+  for(let x=0;x<W;x+=40){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,H);ctx.stroke();}
+  for(let y=0;y<H;y+=40){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke();}
+}
+
+function drawRadar() {
+  const r=state.radar_r;
+  let sx=0,sy=0;
+  if(state.shakeT>0){
+    const s=state.shakeT/300;
+    sx=(Math.random()-0.5)*7*s; sy=(Math.random()-0.5)*7*s;
+  }
+  ctx.save();
+  ctx.translate(CX+sx, CY+sy);
+
+  ctx.save();
+  ctx.beginPath(); ctx.arc(0,0,r,0,Math.PI*2); ctx.clip();
+  ctx.fillStyle='#000e04';
+  ctx.beginPath(); ctx.arc(0,0,r,0,Math.PI*2); ctx.fill();
+
+  for(let i=1;i<=4;i++){
+    ctx.beginPath(); ctx.arc(0,0,r*i/4,0,Math.PI*2);
+    ctx.strokeStyle=`rgba(0,220,70,${0.08+i*0.05})`; ctx.lineWidth=0.8; ctx.stroke();
+  }
+  ctx.strokeStyle='rgba(0,200,60,0.12)'; ctx.lineWidth=0.8;
+  ctx.beginPath(); ctx.moveTo(-r,0); ctx.lineTo(r,0); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(0,-r); ctx.lineTo(0,r); ctx.stroke();
+
+  const trailSpan=Math.PI*0.85;
+  for(let i=0;i<50;i++){
+    const frac=i/50;
+    const a0=state.scanAngle-trailSpan*frac-0.05;
+    const a1=state.scanAngle-trailSpan*frac;
+    ctx.beginPath(); ctx.moveTo(0,0); ctx.arc(0,0,r,a0,a1); ctx.closePath();
+    ctx.fillStyle=`rgba(0,255,70,${(1-frac)*0.20})`; ctx.fill();
+  }
+  ctx.save(); ctx.rotate(state.scanAngle);
+  ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(r,0);
+  ctx.strokeStyle='rgba(140,255,160,0.95)'; ctx.lineWidth=1.8; ctx.stroke();
+  ctx.beginPath(); ctx.arc(r,0,3,0,Math.PI*2);
+  ctx.fillStyle='rgba(200,255,210,0.8)'; ctx.fill();
+  ctx.restore();
+  ctx.restore();
+
+  if(state.radarColor!=='default'){
+    const ov={success:'rgba(0,255,80,0.07)',danger:'rgba(255,60,60,0.09)',warning:'rgba(255,160,0,0.09)'}[state.radarColor];
+    if(ov){ctx.beginPath();ctx.arc(0,0,r,0,Math.PI*2);ctx.fillStyle=ov;ctx.fill();}
+  }
+  const ringC={default:'rgba(0,230,80,0.9)',success:'rgba(0,255,100,1)',danger:'rgba(255,80,80,0.95)',warning:'rgba(255,180,0,0.95)'}[state.radarColor]||'rgba(0,230,80,0.9)';
+  ctx.beginPath(); ctx.arc(0,0,r,0,Math.PI*2); ctx.strokeStyle=ringC; ctx.lineWidth=2; ctx.stroke();
+  ctx.beginPath(); ctx.arc(0,0,r,0,Math.PI*2); ctx.strokeStyle=ringC; ctx.lineWidth=10; ctx.globalAlpha=0.15; ctx.stroke(); ctx.globalAlpha=1;
+  ctx.beginPath(); ctx.arc(0,0,4,0,Math.PI*2); ctx.fillStyle='#00ff60'; ctx.fill();
+  ctx.beginPath(); ctx.arc(0,0,9,0,Math.PI*2); ctx.strokeStyle='rgba(0,255,80,0.3)'; ctx.lineWidth=1; ctx.stroke();
+  ctx.restore();
+}
+
+function drawPath() {
+  if(!state.sub) return;
+  const{p1,p2}=state.sub;
+  ctx.beginPath(); ctx.moveTo(p1.x,p1.y); ctx.lineTo(p2.x,p2.y);
+  ctx.strokeStyle='rgba(255,200,50,0.55)'; ctx.lineWidth=1.5;
+  ctx.setLineDash([8,4]); ctx.stroke(); ctx.setLineDash([]);
+}
+
+function drawSub() {
+  const{p1,p2}=state.sub;
+  const x=p1.x+(p2.x-p1.x)*state.subT, y=p1.y+(p2.y-p1.y)*state.subT;
+  const angle=Math.atan2(p2.y-p1.y,p2.x-p1.x);
+  ctx.save(); ctx.translate(x,y); ctx.rotate(angle);
+  ctx.fillStyle='#cc3333';
+  ctx.beginPath(); ctx.ellipse(0,0,18,7,0,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#aa2222';
+  ctx.beginPath(); ctx.moveTo(6,-7); ctx.lineTo(12,-7); ctx.lineTo(8,-12); ctx.lineTo(4,-12); ctx.closePath(); ctx.fill();
+  ctx.strokeStyle='rgba(255,80,80,0.35)'; ctx.lineWidth=1;
+  for(let i=1;i<=3;i++){
+    ctx.beginPath(); ctx.arc(0,0,18+i*10,-0.4,0.4); ctx.globalAlpha=0.25/i; ctx.stroke();
+  }
+  ctx.globalAlpha=1; ctx.restore();
+}
+
+function drawEndpoints() {
+  if(!state.sub) return;
+  const{p1,p2}=state.sub;
+  drawPt(p1,'출발','#ffcc44');
+  if(state.subT>=0.85||state.resultShown) drawPt(p2,'도착','#ff8844');
+}
+
+function drawPt(p,label,color) {
+  ctx.beginPath(); ctx.arc(p.x,p.y,5,0,Math.PI*2); ctx.fillStyle=color; ctx.fill();
+  ctx.strokeStyle=color; ctx.lineWidth=1;
+  ctx.beginPath(); ctx.arc(p.x,p.y,10,0,Math.PI*2); ctx.globalAlpha=0.35; ctx.stroke(); ctx.globalAlpha=1;
+  ctx.fillStyle=color; ctx.font='11px "Share Tech Mono"'; ctx.fillText(label,p.x+12,p.y-6);
+}
+
+document.getElementById('radiusSlider').addEventListener('input',function(){
+  state.radar_r=parseInt(this.value);
+  document.getElementById('sliderVal').textContent=this.value;
+  if(state.phase!=='idle') draw();
+});
+document.getElementById('submitBtn').addEventListener('click',submit);
+
+draw();
+</script>
+</body>
+</html>
